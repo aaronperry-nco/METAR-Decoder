@@ -135,7 +135,7 @@
                 const uHour = String(metarDate.getUTCHours()).padStart(2, '0');
                 const uMin = String(metarDate.getUTCMinutes()).padStart(2, '0');
                 
-                const utcStr = `${uMon} ${uDay}, ${uYear} ${uHour}:${uMin}Z`;
+                const utcStr = `${uMon} ${uDay}, ${uYear} ${uHour}${uMin}Z`;
 
                 decodedData['Time'] = `${localStr} (${utcStr})`;
             } 
