@@ -3,14 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto METAR Decoder</title>
+    <title>Auto METAR Decoder Pro</title>
     <style>
         body { font-family: Arial, sans-serif; background-color: #f4f4f9; padding: 20px; }
-        .container { max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-        textarea { width: 100%; height: 80px; padding: 10px; margin-bottom: 20px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-family: monospace; font-size: 16px; }
+        .container { max-width: 700px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        textarea { width: 100%; height: 100px; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-family: monospace; font-size: 16px; }
+        
+        .controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 15px; }
+        .toggle-group { display: flex; border: 1px solid #0056b3; border-radius: 4px; overflow: hidden; }
+        .toggle-btn { background-color: white; color: #0056b3; border: none; padding: 8px 15px; cursor: pointer; font-size: 14px; font-weight: bold; transition: 0.2s; }
+        .toggle-btn.active { background-color: #0056b3; color: white; }
+        .toggle-btn:focus { outline: none; }
+
         .result-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
-        .result-row strong { color: #333; }
-        .result-row span { color: #0056b3; text-align: right; max-width: 60%; }
+        .result-row strong { color: #333; flex-shrink: 0; padding-right: 15px;}
+        .result-row span { color: #0056b3; text-align: right; }
+        .remark-header { background-color: #e9ecef; padding: 8px 10px; margin-top: 15px; border-radius: 4px; font-weight: bold; color: #495057; font-size: 0.9em; text-transform: uppercase; letter-spacing: 1px; }
         #output { margin-top: 10px; }
     </style>
 </head>
@@ -18,15 +26,25 @@
 
 <div class="container">
     <h2>Paste METAR Here</h2>
-    <textarea id="metarInput" placeholder="e.g. KJFK 121453Z 31015G25KT 10SM SCT040 15/08 A2992" oninput="processMetar()"></textarea>
+    <textarea id="metarInput" placeholder="e.g. KABC 121755Z AUTO 21016G24KT 180V240 1SM R11/P6000FT -RA BR BKN015 OVC025 06/04 A2990 RMK A02 PK WND 20032/25 SLP125 P0003 T00640036" oninput="processMetar()"></textarea>
 
-    <h3>Decoded Output</h3>
+    <div class="controls">
+        <h3 style="margin: 0;">Decoded Output</h3>
+        <div class="toggle-group">
+            <button id="btnImp" class="toggle-btn active" onclick="setUnit(false)">Imperial</button>
+            <button id="btnMet" class="toggle-btn" onclick="setUnit(true)">Metric</button>
+        </div>
+    </div>
+
     <div id="output">
         <p style="color: #888;">Awaiting input...</p>
     </div>
 </div>
 
 <script>
+    // Global state for units
+    let isMetric = false;
+
     // Dictionary for cloud cover codes
     const cloudCoverMap = {
         'SKC': 'Sky Clear',
@@ -38,118 +56,215 @@
         'VV': 'Vertical Visibility'
     };
 
+    function setUnit(metricFlag) {
+        isMetric = metricFlag;
+        document.getElementById('btnImp').classList.toggle('active', !isMetric);
+        document.getElementById('btnMet').classList.toggle('active', isMetric);
+        processMetar();
+    }
+
     function decodeMetarLogic(metarRaw) {
         metarRaw = metarRaw.toUpperCase().trim();
-        
-        // Remove the word "METAR" if the user pasted it at the start
-        if (metarRaw.startsWith("METAR ")) {
-            metarRaw = metarRaw.substring(6);
-        }
+        if (metarRaw.startsWith("METAR ")) metarRaw = metarRaw.substring(6);
 
-        // Split at "RMK" first to handle remarks separately
         const parts = metarRaw.split(' RMK ');
         const mainBody = parts[0];
-        const remarks = parts.length > 1 ? parts[1] : null;
+        const remarksStr = parts.length > 1 ? parts[1] : null;
 
         const tokens = mainBody.split(/\s+/);
         const decodedData = {};
+        const parsedRemarksData = {};
 
+        // --- 1. PARSE MAIN METAR BODY ---
         tokens.forEach(token => {
             if (!token) return;
 
-            // 1. Station Identifier (ICAO)
             if (/^[A-Z0-9]{4}$/.test(token) && !decodedData['Station']) {
                 decodedData['Station'] = token;
             } 
-            // 2. Issuance Time
             else if (/^(\d{2})(\d{2})(\d{2})Z$/.test(token)) {
                 const match = token.match(/^(\d{2})(\d{2})(\d{2})Z$/);
                 decodedData['Time'] = `Day ${match[1]} at ${match[2]}:${match[3]} UTC (Zulu)`;
             } 
-            // 3. Modifiers
-            else if (token === 'COR') {
-                decodedData['Modifier'] = 'Corrected Observation';
-            }
-            else if (token === 'AUTO') {
-                decodedData['Modifier'] = 'Automated Observation';
-            }
-            // 4. Winds
+            else if (token === 'COR') decodedData['Modifier'] = 'Corrected Observation';
+            else if (token === 'AUTO') decodedData['Modifier'] = 'Automated Observation';
+            
             else if (/^(\d{3}|VRB)(\d{2,3})(G\d{2,3})?(KT|MPS|KMH)$/.test(token)) {
                 const match = token.match(/^(\d{3}|VRB)(\d{2,3})(G\d{2,3})?(KT|MPS|KMH)$/);
                 const direction = match[1] === 'VRB' ? 'Variable' : `${match[1]}&deg; True`;
-                const speed = parseInt(match[2], 10);
-                const unit = match[4];
-                
-                let windString = `${speed} ${unit} from ${direction}`;
-                if (match[3]) {
-                    const gusts = parseInt(match[3].substring(1), 10);
-                    windString += `, Gusting to ${gusts} ${unit}`;
+                let speed = parseInt(match[2], 10);
+                let unitStr = match[4];
+                let gustStr = "";
+
+                if (match[4] === 'KT' && isMetric) {
+                    speed = Math.round(speed * 1.852);
+                    unitStr = 'km/h';
                 }
-                decodedData['Winds'] = windString;
+
+                if (match[3]) {
+                    let gusts = parseInt(match[3].substring(1), 10);
+                    if (match[4] === 'KT' && isMetric) gusts = Math.round(gusts * 1.852);
+                    gustStr = `, Gusting to ${gusts} ${unitStr}`;
+                }
+                decodedData['Winds'] = `${speed} ${unitStr} from ${direction}${gustStr}`;
             } 
-            // 5. Visibility
+            else if (/^(\d{3})V(\d{3})$/.test(token)) {
+                const match = token.match(/^(\d{3})V(\d{3})$/);
+                decodedData['Wind Variability'] = `Varying between ${match[1]}&deg; and ${match[2]}&deg;`;
+            }
             else if (/^(P?)([\d\/]+)SM$/.test(token)) {
                 const match = token.match(/^(P?)([\d\/]+)SM$/);
                 const prefix = match[1] === 'P' ? 'Greater than ' : '';
-                decodedData['Visibility'] = `${prefix}${match[2]} Statute Miles`;
+                const visStr = match[2];
+                if (isMetric) {
+                    let visDecimal = visStr.includes('/') ? (parseInt(visStr.split('/')[0]) / parseInt(visStr.split('/')[1])) : parseFloat(visStr);
+                    let km = (visDecimal * 1.60934).toFixed(1);
+                    decodedData['Visibility'] = `${prefix}${km} Kilometers`;
+                } else {
+                    decodedData['Visibility'] = `${prefix}${visStr} Statute Miles`;
+                }
             }
-            // 6. Sky Condition / Clouds
             else if (/^(SKC|CLR|FEW|SCT|BKN|OVC|VV)(\d{3})?(CB|TCU)?$/.test(token)) {
                 const match = token.match(/^(SKC|CLR|FEW|SCT|BKN|OVC|VV)(\d{3})?(CB|TCU)?$/);
                 const cover = cloudCoverMap[match[1]];
                 let layer = cover;
-                
                 if (match[2]) {
-                    const height = parseInt(match[2], 10) * 100;
-                    layer += ` at ${height.toLocaleString()} feet`;
+                    const heightFeet = parseInt(match[2], 10) * 100;
+                    if (isMetric) layer += ` at ${Math.round(heightFeet * 0.3048).toLocaleString()} meters`;
+                    else layer += ` at ${heightFeet.toLocaleString()} feet`;
                 }
-                if (match[3]) {
-                    const type = match[3] === 'CB' ? ' (Cumulonimbus)' : ' (Towering Cumulus)';
-                    layer += type;
-                }
-                
-                if (decodedData['Sky Condition']) {
-                    decodedData['Sky Condition'] += "<br>" + layer;
-                } else {
-                    decodedData['Sky Condition'] = layer;
-                }
+                if (match[3]) layer += match[3] === 'CB' ? ' (Cumulonimbus)' : ' (Towering Cumulus)';
+                decodedData['Sky Condition'] = decodedData['Sky Condition'] ? decodedData['Sky Condition'] + "<br>" + layer : layer;
             }
-            // 7. Temperature & Dewpoint
             else if (/^(M?\d{2})\/(M?\d{2})?$/.test(token)) {
                 const match = token.match(/^(M?\d{2})\/(M?\d{2})?$/);
-                const temp = match[1].replace('M', '-');
-                const dewpoint = match[2] ? match[2].replace('M', '-') : 'Unknown';
-                decodedData['Temperature / Dewpoint'] = `${temp} &deg;C / ${dewpoint} &deg;C`;
+                let tempC = parseInt(match[1].replace('M', '-'), 10);
+                let dewC = match[2] ? parseInt(match[2].replace('M', '-'), 10) : null;
+                if (isMetric) {
+                    decodedData['Temperature / Dewpoint'] = `${tempC} &deg;C / ${dewC !== null ? dewC + ' &deg;C' : 'Unknown'}`;
+                } else {
+                    let tempF = Math.round((tempC * 9/5) + 32);
+                    let dewF = dewC !== null ? Math.round((dewC * 9/5) + 32) + ' &deg;F' : 'Unknown';
+                    decodedData['Temperature / Dewpoint'] = `${tempF} &deg;F / ${dewF}`;
+                }
             } 
-            // 8. Altimeter / Pressure
             else if (/^A(\d{4})$/.test(token)) {
                 const match = token.match(/^A(\d{4})$/);
-                const inches = match[1].substring(0, 2) + "." + match[1].substring(2, 4);
-                decodedData['Altimeter'] = `${inches} inHg`;
+                let inHg = parseFloat(match[1].substring(0, 2) + "." + match[1].substring(2, 4));
+                if (isMetric) decodedData['Altimeter'] = `${Math.round(inHg * 33.8639)} hPa`;
+                else decodedData['Altimeter'] = `${inHg.toFixed(2)} inHg`;
             }
-            // 9. Basic Weather Phenomena
             else if (/^(-|\+|VC)?(TS|SH|FZ|PR|MI|BC|DR|BL)?(RA|SN|DZ|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)+$/.test(token)) {
                 const match = token.match(/^(-|\+|VC)?(TS|SH|FZ|PR|MI|BC|DR|BL)?(RA|SN|DZ|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)+$/);
-                let intensity = "";
-                if (match && match[1] === '-') intensity = "Light ";
-                if (match && match[1] === '+') intensity = "Heavy ";
-                if (match && match[1] === 'VC') intensity = "In Vicinity: ";
-                
+                let intensity = match && match[1] === '-' ? "Light " : match && match[1] === '+' ? "Heavy " : match && match[1] === 'VC' ? "In Vicinity: " : "";
                 let wxString = intensity + token + " (Raw Code)";
-                if (decodedData['Weather']) {
-                    decodedData['Weather'] += ", " + wxString;
-                } else {
-                    decodedData['Weather'] = wxString;
-                }
+                decodedData['Weather'] = decodedData['Weather'] ? decodedData['Weather'] + ", " + wxString : wxString;
             }
         });
 
-        // Attach Remarks
-        if (remarks) {
-            decodedData['Remarks'] = remarks;
+        // --- 2. PARSE REMARKS (RMK) ---
+        if (remarksStr) {
+            let rStr = remarksStr;
+
+            if (rStr.includes('AO1')) { parsedRemarksData['Station Type'] = 'Automated (No Precip Discriminator)'; rStr = rStr.replace(/\bAO1\b/, ''); }
+            if (rStr.includes('AO2')) { parsedRemarksData['Station Type'] = 'Automated (With Precip Discriminator)'; rStr = rStr.replace(/\bAO2\b/, ''); }
+            if (rStr.includes('$')) { parsedRemarksData['Maintenance'] = 'System requires maintenance ($)'; rStr = rStr.replace(/\$/, ''); }
+
+            const pkWndMatch = rStr.match(/\bPK WND (\d{3})(\d{2,3})\/(\d{2,4})\b/);
+            if (pkWndMatch) {
+                const dir = pkWndMatch[1];
+                let spd = parseInt(pkWndMatch[2], 10);
+                let unitStr = "KT";
+                if (isMetric) { spd = Math.round(spd * 1.852); unitStr = "km/h"; }
+                let timeStr = pkWndMatch[3].length === 4 ? `at ${pkWndMatch[3].substring(0,2)}:${pkWndMatch[3].substring(2,4)}Z` : `at ${pkWndMatch[3]} minutes past the hour`;
+                parsedRemarksData['Peak Wind'] = `${spd} ${unitStr} from ${dir}&deg; True ${timeStr}`;
+                rStr = rStr.replace(pkWndMatch[0], '');
+            }
+
+            const slpMatch = rStr.match(/\bSLP(\d{3})\b/);
+            if (slpMatch) {
+                let ppp = parseInt(slpMatch[1], 10);
+                let hPa = ppp / 10 + (ppp < 500 ? 1000 : 900);
+                if (isMetric) parsedRemarksData['Sea-Level Pressure'] = `${hPa.toFixed(1)} hPa`;
+                else parsedRemarksData['Sea-Level Pressure'] = `${(hPa * 0.02953).toFixed(2)} inHg`;
+                rStr = rStr.replace(slpMatch[0], '');
+            }
+
+            const tMatch = rStr.match(/\bT([01])(\d{3})([01])(\d{3})\b/);
+            if (tMatch) {
+                let tC = (parseInt(tMatch[2], 10) / 10) * (tMatch[1] === '1' ? -1 : 1);
+                let dC = (parseInt(tMatch[4], 10) / 10) * (tMatch[3] === '1' ? -1 : 1);
+                if (isMetric) parsedRemarksData['Precise Temp / Dewpoint'] = `${tC.toFixed(1)} &deg;C / ${dC.toFixed(1)} &deg;C`;
+                else parsedRemarksData['Precise Temp / Dewpoint'] = `${(tC * 9/5 + 32).toFixed(1)} &deg;F / ${(dC * 9/5 + 32).toFixed(1)} &deg;F`;
+                rStr = rStr.replace(tMatch[0], '');
+            }
+
+            const max6Match = rStr.match(/\b1([01])(\d{3})\b/);
+            if (max6Match) {
+                let tC = (parseInt(max6Match[2], 10) / 10) * (max6Match[1] === '1' ? -1 : 1);
+                if (isMetric) parsedRemarksData['6-Hour Max Temp'] = `${tC.toFixed(1)} &deg;C`;
+                else parsedRemarksData['6-Hour Max Temp'] = `${(tC * 9/5 + 32).toFixed(1)} &deg;F`;
+                rStr = rStr.replace(max6Match[0], '');
+            }
+
+            const min6Match = rStr.match(/\b2([01])(\d{3})\b/);
+            if (min6Match) {
+                let tC = (parseInt(min6Match[2], 10) / 10) * (min6Match[1] === '1' ? -1 : 1);
+                if (isMetric) parsedRemarksData['6-Hour Min Temp'] = `${tC.toFixed(1)} &deg;C`;
+                else parsedRemarksData['6-Hour Min Temp'] = `${(tC * 9/5 + 32).toFixed(1)} &deg;F`;
+                rStr = rStr.replace(min6Match[0], '');
+            }
+
+            const maxmin24Match = rStr.match(/\b4([01])(\d{3})([01])(\d{3})\b/);
+            if (maxmin24Match) {
+                let maxC = (parseInt(maxmin24Match[2], 10) / 10) * (maxmin24Match[1] === '1' ? -1 : 1);
+                let minC = (parseInt(maxmin24Match[4], 10) / 10) * (maxmin24Match[3] === '1' ? -1 : 1);
+                if (isMetric) parsedRemarksData['24-Hour Max/Min Temp'] = `${maxC.toFixed(1)} &deg;C / ${minC.toFixed(1)} &deg;C`;
+                else parsedRemarksData['24-Hour Max/Min Temp'] = `${(maxC * 9/5 + 32).toFixed(1)} &deg;F / ${(minC * 9/5 + 32).toFixed(1)} &deg;F`;
+                rStr = rStr.replace(maxmin24Match[0], '');
+            }
+
+            const precipRegexes = [
+                { regex: /\bP(\d{4})\b/, key: 'Hourly Precipitation' },
+                { regex: /\b6(\d{4})\b/, key: '3/6-Hour Precipitation' },
+                { regex: /\b7(\d{4})\b/, key: '24-Hour Precipitation' }
+            ];
+            precipRegexes.forEach(p => {
+                const match = rStr.match(p.regex);
+                if (match) {
+                    let pInches = parseInt(match[1], 10) / 100;
+                    if (pInches === 0) parsedRemarksData[p.key] = "Trace amounts";
+                    else if (isMetric) parsedRemarksData[p.key] = `${(pInches * 25.4).toFixed(2)} mm`;
+                    else parsedRemarksData[p.key] = `${pInches.toFixed(2)} inches`;
+                    rStr = rStr.replace(match[0], '');
+                }
+            });
+
+            const pTendencyMatch = rStr.match(/\b5([0-8])(\d{3})\b/);
+            if (pTendencyMatch) {
+                let changehPa = parseInt(pTendencyMatch[2], 10) / 10;
+                let a = parseInt(pTendencyMatch[1], 10);
+                let trend = "changed by";
+                if (a >= 0 && a <= 3) trend = "increased by";
+                if (a >= 5 && a <= 8) trend = "decreased by";
+                if (isMetric) parsedRemarksData['Pressure Trend (3hr)'] = `${trend} ${changehPa.toFixed(1)} hPa`;
+                else parsedRemarksData['Pressure Trend (3hr)'] = `${trend} ${(changehPa * 0.02953).toFixed(3)} inHg`;
+                rStr = rStr.replace(pTendencyMatch[0], '');
+            }
+
+            const sensors = { 'RVRNO': 'RVR missing', 'PWINO': 'Precip identifier missing', 'PNO': 'Precip amount missing', 'FZRANO': 'Freezing rain sensor missing', 'TSNO': 'Thunderstorm info missing', 'SLPNO': 'Sea-Level Pressure missing' };
+            let offlineSensors = [];
+            for (const [key, desc] of Object.entries(sensors)) {
+                const regex = new RegExp(`\\b${key}\\b`);
+                if (rStr.match(regex)) { offlineSensors.push(desc); rStr = rStr.replace(regex, ''); }
+            }
+            if (offlineSensors.length > 0) parsedRemarksData['Sensor Status'] = offlineSensors.join(', ');
+
+            rStr = rStr.replace(/\s{2,}/g, ' ').trim();
+            if (rStr.length > 0) parsedRemarksData['Unparsed Remarks'] = rStr;
         }
 
-        return decodedData;
+        return { main: decodedData, rmk: parsedRemarksData };
     }
 
     function processMetar() {
@@ -162,23 +277,23 @@
         }
 
         try {
-            // Decode directly in JS instead of calling a backend
-            const decodedResult = decodeMetarLogic(input);
-            
+            const result = decodeMetarLogic(input);
             let htmlContent = '';
-            for (const [key, value] of Object.entries(decodedResult)) {
-                htmlContent += `
-                    <div class="result-row">
-                        <strong>${key}</strong>
-                        <span>${value}</span>
-                    </div>
-                `;
+            
+            // Build Main Body Elements
+            for (const [key, value] of Object.entries(result.main)) {
+                htmlContent += `<div class="result-row"><strong>${key}</strong><span>${value}</span></div>`;
             }
 
-            if (htmlContent === '') {
-                htmlContent = '<p style="color: orange;">Could not parse METAR data.</p>';
+            // Build RMK Elements
+            if (Object.keys(result.rmk).length > 0) {
+                htmlContent += `<div class="remark-header">Remarks & Auxiliary Data</div>`;
+                for (const [key, value] of Object.entries(result.rmk)) {
+                    htmlContent += `<div class="result-row"><strong>${key}</strong><span>${value}</span></div>`;
+                }
             }
 
+            if (htmlContent === '') htmlContent = '<p style="color: orange;">Could not parse METAR data.</p>';
             outputDiv.innerHTML = htmlContent;
 
         } catch (error) {
