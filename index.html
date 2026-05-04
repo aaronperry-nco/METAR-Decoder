@@ -146,7 +146,7 @@
             
             else if (/^(\d{3}|VRB)(\d{2,3})(G\d{2,3})?(KT|MPS|KMH)$/.test(token)) {
                 const match = token.match(/^(\d{3}|VRB)(\d{2,3})(G\d{2,3})?(KT|MPS|KMH)$/);
-                let direction = match[1] !== 'VRB' ? `${parseInt(match[1], 10)}&deg; True (${getCardinalDirection(parseInt(match[1], 10))})` : 'Variable';
+                let direction = match[1] !== 'VRB' ? `${parseInt(match[1], 10)}&deg; (${getCardinalDirection(parseInt(match[1], 10))})` : 'Variable';
 
                 let speed = parseInt(match[2], 10);
                 let unitStr = match[4];
