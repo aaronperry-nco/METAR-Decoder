@@ -278,7 +278,7 @@
             const pkWndMatch = rStr.match(/\bPK WND (\d{3})(\d{2,3})\/(\d{2,4})\b/);
             if (pkWndMatch) {
                 const dirDeg = parseInt(pkWndMatch[1], 10);
-                const dirStr = `${dirDeg}&deg; True (${getCardinalDirection(dirDeg)})`;
+                const dirStr = `${dirDeg}&deg; (${getCardinalDirection(dirDeg)})`;
 
                 let spd = parseInt(pkWndMatch[2], 10);
                 let unitStr = "KT";
