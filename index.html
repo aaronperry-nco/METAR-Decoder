@@ -56,6 +56,13 @@
         'VV': 'Vertical Visibility'
     };
 
+    // Helper to get cardinal direction from degrees
+    function getCardinalDirection(angle) {
+        const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+        const index = Math.round(((angle %= 360) < 0 ? angle + 360 : angle) / 22.5) % 16;
+        return directions[index];
+    }
+
     function setUnit(metricFlag) {
         isMetric = metricFlag;
         document.getElementById('btnImp').classList.toggle('active', !isMetric);
@@ -79,19 +86,54 @@
         tokens.forEach(token => {
             if (!token) return;
 
+            // 1. Station Identifier
             if (/^[A-Z0-9]{4}$/.test(token) && !decodedData['Station']) {
                 decodedData['Station'] = token;
             } 
+            // 2. Issuance Time (Converted to Local MM DD YY HH:MM)
             else if (/^(\d{2})(\d{2})(\d{2})Z$/.test(token)) {
                 const match = token.match(/^(\d{2})(\d{2})(\d{2})Z$/);
-                decodedData['Time'] = `Day ${match[1]} at ${match[2]}:${match[3]} UTC (Zulu)`;
+                const metarDay = parseInt(match[1], 10);
+                const metarHour = parseInt(match[2], 10);
+                const metarMinute = parseInt(match[3], 10);
+
+                const now = new Date();
+                let metarDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), metarDay, metarHour, metarMinute));
+
+                if (metarDay > now.getUTCDate() + 15) {
+                    metarDate.setUTCMonth(metarDate.getUTCMonth() - 1);
+                }
+
+                const mm = String(metarDate.getMonth() + 1).padStart(2, '0');
+                const dd = String(metarDate.getDate()).padStart(2, '0');
+                const yy = String(metarDate.getFullYear()).slice(-2);
+                const hh = String(metarDate.getHours()).padStart(2, '0');
+                const min = String(metarDate.getMinutes()).padStart(2, '0');
+                const localStr = `${mm} ${dd} ${yy} ${hh}:${min}`;
+
+                const utcMm = String(metarDate.getUTCMonth() + 1).padStart(2, '0');
+                const utcDd = String(metarDate.getUTCDate()).padStart(2, '0');
+                const utcYy = String(metarDate.getUTCFullYear()).slice(-2);
+                const utcHh = String(metarDate.getUTCHours()).padStart(2, '0');
+                const utcMin = String(metarDate.getUTCMinutes()).padStart(2, '0');
+                const utcStr = `${utcMm} ${utcDd} ${utcYy} ${utcHh}:${utcMin} UTC`;
+
+                decodedData['Time'] = `${localStr} (${utcStr})`;
             } 
+            // 3. Modifiers
             else if (token === 'COR') decodedData['Modifier'] = 'Corrected Observation';
             else if (token === 'AUTO') decodedData['Modifier'] = 'Automated Observation';
             
+            // 4. Winds
             else if (/^(\d{3}|VRB)(\d{2,3})(G\d{2,3})?(KT|MPS|KMH)$/.test(token)) {
                 const match = token.match(/^(\d{3}|VRB)(\d{2,3})(G\d{2,3})?(KT|MPS|KMH)$/);
-                const direction = match[1] === 'VRB' ? 'Variable' : `${match[1]}&deg; True`;
+                
+                let direction = 'Variable';
+                if (match[1] !== 'VRB') {
+                    const dirDeg = parseInt(match[1], 10);
+                    direction = `${dirDeg}&deg; True (${getCardinalDirection(dirDeg)})`;
+                }
+
                 let speed = parseInt(match[2], 10);
                 let unitStr = match[4];
                 let gustStr = "";
@@ -101,7 +143,6 @@
                         speed = Math.round(speed * 1.852);
                         unitStr = 'km/h';
                     } else {
-                        // Imperial: Knots to MPH
                         speed = Math.round(speed * 1.15078);
                         unitStr = 'MPH';
                     }
@@ -111,16 +152,20 @@
                     let gusts = parseInt(match[3].substring(1), 10);
                     if (match[4] === 'KT') {
                         if (isMetric) gusts = Math.round(gusts * 1.852);
-                        else gusts = Math.round(gusts * 1.15078); // Imperial: Knots to MPH
+                        else gusts = Math.round(gusts * 1.15078); 
                     }
                     gustStr = `, Gusting to ${gusts} ${unitStr}`;
                 }
                 decodedData['Winds'] = `${speed} ${unitStr} from ${direction}${gustStr}`;
             } 
+            // 5. Wind Variability
             else if (/^(\d{3})V(\d{3})$/.test(token)) {
                 const match = token.match(/^(\d{3})V(\d{3})$/);
-                decodedData['Wind Variability'] = `Varying between ${match[1]}&deg; and ${match[2]}&deg;`;
+                const deg1 = parseInt(match[1], 10);
+                const deg2 = parseInt(match[2], 10);
+                decodedData['Wind Variability'] = `Varying between ${deg1}&deg; (${getCardinalDirection(deg1)}) and ${deg2}&deg; (${getCardinalDirection(deg2)})`;
             }
+            // 6. Visibility
             else if (/^(P?)([\d\/]+)SM$/.test(token)) {
                 const match = token.match(/^(P?)([\d\/]+)SM$/);
                 const prefix = match[1] === 'P' ? 'Greater than ' : '';
@@ -133,6 +178,7 @@
                     decodedData['Visibility'] = `${prefix}${visStr} Statute Miles`;
                 }
             }
+            // 7. Sky Condition
             else if (/^(SKC|CLR|FEW|SCT|BKN|OVC|VV)(\d{3})?(CB|TCU)?$/.test(token)) {
                 const match = token.match(/^(SKC|CLR|FEW|SCT|BKN|OVC|VV)(\d{3})?(CB|TCU)?$/);
                 const cover = cloudCoverMap[match[1]];
@@ -145,6 +191,7 @@
                 if (match[3]) layer += match[3] === 'CB' ? ' (Cumulonimbus)' : ' (Towering Cumulus)';
                 decodedData['Sky Condition'] = decodedData['Sky Condition'] ? decodedData['Sky Condition'] + "<br>" + layer : layer;
             }
+            // 8. Temp & Dewpoint
             else if (/^(M?\d{2})\/(M?\d{2})?$/.test(token)) {
                 const match = token.match(/^(M?\d{2})\/(M?\d{2})?$/);
                 let tempC = parseInt(match[1].replace('M', '-'), 10);
@@ -157,13 +204,14 @@
                     decodedData['Temperature / Dewpoint'] = `${tempF} &deg;F / ${dewF}`;
                 }
             } 
+            // 9. Altimeter
             else if (/^A(\d{4})$/.test(token)) {
                 const match = token.match(/^A(\d{4})$/);
                 let inHg = parseFloat(match[1].substring(0, 2) + "." + match[1].substring(2, 4));
-                // Pressure displayed in hPa for both Imperial and Metric
                 let hPa = Math.round(inHg * 33.8639);
                 decodedData['Altimeter'] = `${hPa} hPa`;
             }
+            // 10. Weather phenomena
             else if (/^(-|\+|VC)?(TS|SH|FZ|PR|MI|BC|DR|BL)?(RA|SN|DZ|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)+$/.test(token)) {
                 const match = token.match(/^(-|\+|VC)?(TS|SH|FZ|PR|MI|BC|DR|BL)?(RA|SN|DZ|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)+$/);
                 let intensity = match && match[1] === '-' ? "Light " : match && match[1] === '+' ? "Heavy " : match && match[1] === 'VC' ? "In Vicinity: " : "";
@@ -182,19 +230,20 @@
 
             const pkWndMatch = rStr.match(/\bPK WND (\d{3})(\d{2,3})\/(\d{2,4})\b/);
             if (pkWndMatch) {
-                const dir = pkWndMatch[1];
+                const dirDeg = parseInt(pkWndMatch[1], 10);
+                const dirStr = `${dirDeg}&deg; True (${getCardinalDirection(dirDeg)})`;
+
                 let spd = parseInt(pkWndMatch[2], 10);
                 let unitStr = "KT";
                 if (isMetric) { 
                     spd = Math.round(spd * 1.852); 
                     unitStr = "km/h"; 
                 } else {
-                    // Imperial: Knots to MPH
                     spd = Math.round(spd * 1.15078); 
                     unitStr = "MPH";
                 }
                 let timeStr = pkWndMatch[3].length === 4 ? `at ${pkWndMatch[3].substring(0,2)}:${pkWndMatch[3].substring(2,4)}Z` : `at ${pkWndMatch[3]} minutes past the hour`;
-                parsedRemarksData['Peak Wind'] = `${spd} ${unitStr} from ${dir}&deg; True ${timeStr}`;
+                parsedRemarksData['Peak Wind'] = `${spd} ${unitStr} from ${dirStr} ${timeStr}`;
                 rStr = rStr.replace(pkWndMatch[0], '');
             }
 
@@ -202,7 +251,6 @@
             if (slpMatch) {
                 let ppp = parseInt(slpMatch[1], 10);
                 let hPa = ppp / 10 + (ppp < 500 ? 1000 : 900);
-                // Pressure displayed in hPa for both Imperial and Metric
                 parsedRemarksData['Sea-Level Pressure'] = `${hPa.toFixed(1)} hPa`;
                 rStr = rStr.replace(slpMatch[0], '');
             }
@@ -264,7 +312,6 @@
                 let trend = "changed by";
                 if (a >= 0 && a <= 3) trend = "increased by";
                 if (a >= 5 && a <= 8) trend = "decreased by";
-                // Pressure trend displayed in hPa for both Imperial and Metric
                 parsedRemarksData['Pressure Trend (3hr)'] = `${trend} ${changehPa.toFixed(1)} hPa`;
                 rStr = rStr.replace(pTendencyMatch[0], '');
             }
@@ -297,12 +344,10 @@
             const result = decodeMetarLogic(input);
             let htmlContent = '';
             
-            // Build Main Body Elements
             for (const [key, value] of Object.entries(result.main)) {
                 htmlContent += `<div class="result-row"><strong>${key}</strong><span>${value}</span></div>`;
             }
 
-            // Build RMK Elements
             if (Object.keys(result.rmk).length > 0) {
                 htmlContent += `<div class="remark-header">Remarks & Auxiliary Data</div>`;
                 for (const [key, value] of Object.entries(result.rmk)) {
