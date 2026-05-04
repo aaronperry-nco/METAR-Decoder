@@ -63,6 +63,8 @@
         'PL': 'Ice Pellets', 'GR': 'Hail', 'GS': 'Small Hail', 'UP': 'Unknown Precip'
     };
 
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
     // Helper to get cardinal direction from degrees
     function getCardinalDirection(angle) {
         const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
@@ -97,7 +99,7 @@
             if (/^[A-Z0-9]{4}$/.test(token) && !decodedData['Station']) {
                 decodedData['Station'] = token;
             } 
-            // 2. Issuance Time
+            // 2. Issuance Time (Converted to MMM DD, YYYY HH:MM (TZ))
             else if (/^(\d{2})(\d{2})(\d{2})Z$/.test(token)) {
                 const match = token.match(/^(\d{2})(\d{2})(\d{2})Z$/);
                 const metarDay = parseInt(match[1], 10);
@@ -111,19 +113,29 @@
                     metarDate.setUTCMonth(metarDate.getUTCMonth() - 1);
                 }
 
-                const mm = String(metarDate.getMonth() + 1).padStart(2, '0');
-                const dd = String(metarDate.getDate()).padStart(2, '0');
-                const yy = String(metarDate.getFullYear()).slice(-2);
-                const hh = String(metarDate.getHours()).padStart(2, '0');
-                const min = String(metarDate.getMinutes()).padStart(2, '0');
-                const localStr = `${mm} ${dd} ${yy} ${hh}:${min}`;
+                // Local Time String
+                const lMon = monthNames[metarDate.getMonth()];
+                const lDay = String(metarDate.getDate()).padStart(2, '0');
+                const lYear = metarDate.getFullYear();
+                const lHour = String(metarDate.getHours()).padStart(2, '0');
+                const lMin = String(metarDate.getMinutes()).padStart(2, '0');
+                
+                let tzName = "Local";
+                try { 
+                    const parts = Intl.DateTimeFormat('en-US', { timeZoneName: 'short' }).formatToParts(metarDate);
+                    tzName = parts.find(p => p.type === 'timeZoneName')?.value || 'Local';
+                } catch(e) {}
+                
+                const localStr = `${lMon} ${lDay}, ${lYear} ${lHour}:${lMin} (${tzName})`;
 
-                const utcMm = String(metarDate.getUTCMonth() + 1).padStart(2, '0');
-                const utcDd = String(metarDate.getUTCDate()).padStart(2, '0');
-                const utcYy = String(metarDate.getUTCFullYear()).slice(-2);
-                const utcHh = String(metarDate.getUTCHours()).padStart(2, '0');
-                const utcMin = String(metarDate.getUTCMinutes()).padStart(2, '0');
-                const utcStr = `${utcMm} ${utcDd} ${utcYy} ${utcHh}:${utcMin} UTC`;
+                // UTC Time String
+                const uMon = monthNames[metarDate.getUTCMonth()];
+                const uDay = String(metarDate.getUTCDate()).padStart(2, '0');
+                const uYear = metarDate.getUTCFullYear();
+                const uHour = String(metarDate.getUTCHours()).padStart(2, '0');
+                const uMin = String(metarDate.getUTCMinutes()).padStart(2, '0');
+                
+                const utcStr = `${uMon} ${uDay}, ${uYear} ${uHour}:${uMin} (UTC)`;
 
                 decodedData['Time'] = `${localStr} (${utcStr})`;
             } 
