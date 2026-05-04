@@ -96,14 +96,23 @@
                 let unitStr = match[4];
                 let gustStr = "";
 
-                if (match[4] === 'KT' && isMetric) {
-                    speed = Math.round(speed * 1.852);
-                    unitStr = 'km/h';
+                if (match[4] === 'KT') {
+                    if (isMetric) {
+                        speed = Math.round(speed * 1.852);
+                        unitStr = 'km/h';
+                    } else {
+                        // Imperial: Knots to MPH
+                        speed = Math.round(speed * 1.15078);
+                        unitStr = 'MPH';
+                    }
                 }
 
                 if (match[3]) {
                     let gusts = parseInt(match[3].substring(1), 10);
-                    if (match[4] === 'KT' && isMetric) gusts = Math.round(gusts * 1.852);
+                    if (match[4] === 'KT') {
+                        if (isMetric) gusts = Math.round(gusts * 1.852);
+                        else gusts = Math.round(gusts * 1.15078); // Imperial: Knots to MPH
+                    }
                     gustStr = `, Gusting to ${gusts} ${unitStr}`;
                 }
                 decodedData['Winds'] = `${speed} ${unitStr} from ${direction}${gustStr}`;
@@ -151,8 +160,9 @@
             else if (/^A(\d{4})$/.test(token)) {
                 const match = token.match(/^A(\d{4})$/);
                 let inHg = parseFloat(match[1].substring(0, 2) + "." + match[1].substring(2, 4));
-                if (isMetric) decodedData['Altimeter'] = `${Math.round(inHg * 33.8639)} hPa`;
-                else decodedData['Altimeter'] = `${inHg.toFixed(2)} inHg`;
+                // Pressure displayed in hPa for both Imperial and Metric
+                let hPa = Math.round(inHg * 33.8639);
+                decodedData['Altimeter'] = `${hPa} hPa`;
             }
             else if (/^(-|\+|VC)?(TS|SH|FZ|PR|MI|BC|DR|BL)?(RA|SN|DZ|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)+$/.test(token)) {
                 const match = token.match(/^(-|\+|VC)?(TS|SH|FZ|PR|MI|BC|DR|BL)?(RA|SN|DZ|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)+$/);
@@ -175,7 +185,14 @@
                 const dir = pkWndMatch[1];
                 let spd = parseInt(pkWndMatch[2], 10);
                 let unitStr = "KT";
-                if (isMetric) { spd = Math.round(spd * 1.852); unitStr = "km/h"; }
+                if (isMetric) { 
+                    spd = Math.round(spd * 1.852); 
+                    unitStr = "km/h"; 
+                } else {
+                    // Imperial: Knots to MPH
+                    spd = Math.round(spd * 1.15078); 
+                    unitStr = "MPH";
+                }
                 let timeStr = pkWndMatch[3].length === 4 ? `at ${pkWndMatch[3].substring(0,2)}:${pkWndMatch[3].substring(2,4)}Z` : `at ${pkWndMatch[3]} minutes past the hour`;
                 parsedRemarksData['Peak Wind'] = `${spd} ${unitStr} from ${dir}&deg; True ${timeStr}`;
                 rStr = rStr.replace(pkWndMatch[0], '');
@@ -185,8 +202,8 @@
             if (slpMatch) {
                 let ppp = parseInt(slpMatch[1], 10);
                 let hPa = ppp / 10 + (ppp < 500 ? 1000 : 900);
-                if (isMetric) parsedRemarksData['Sea-Level Pressure'] = `${hPa.toFixed(1)} hPa`;
-                else parsedRemarksData['Sea-Level Pressure'] = `${(hPa * 0.02953).toFixed(2)} inHg`;
+                // Pressure displayed in hPa for both Imperial and Metric
+                parsedRemarksData['Sea-Level Pressure'] = `${hPa.toFixed(1)} hPa`;
                 rStr = rStr.replace(slpMatch[0], '');
             }
 
@@ -247,8 +264,8 @@
                 let trend = "changed by";
                 if (a >= 0 && a <= 3) trend = "increased by";
                 if (a >= 5 && a <= 8) trend = "decreased by";
-                if (isMetric) parsedRemarksData['Pressure Trend (3hr)'] = `${trend} ${changehPa.toFixed(1)} hPa`;
-                else parsedRemarksData['Pressure Trend (3hr)'] = `${trend} ${(changehPa * 0.02953).toFixed(3)} inHg`;
+                // Pressure trend displayed in hPa for both Imperial and Metric
+                parsedRemarksData['Pressure Trend (3hr)'] = `${trend} ${changehPa.toFixed(1)} hPa`;
                 rStr = rStr.replace(pTendencyMatch[0], '');
             }
 
