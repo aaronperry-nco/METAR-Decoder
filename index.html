@@ -26,7 +26,7 @@
 
 <div class="container">
     <h2>Paste METAR Here</h2>
-    <textarea id="metarInput" placeholder="e.g. KABC 121755Z AUTO 21016G24KT 180V240 1SM R11/P6000FT -RA BR BKN015 OVC025 06/04 A2990 RMK A02 PK WND 20032/25 SLP125 P0003 T00640036" oninput="processMetar()"></textarea>
+    <textarea id="metarInput" placeholder="e.g. KABC 121755Z AUTO 21016G24KT 180V240 1SM R11/P6000FT -RA BR BKN015 OVC025 06/04 A2990 RMK AO2 RAB35E50 SNE15 SLP125 P0003 T00640036" oninput="processMetar()"></textarea>
 
     <div class="controls">
         <h3 style="margin: 0;">Decoded Output</h3>
@@ -54,6 +54,13 @@
         'BKN': 'Broken',
         'OVC': 'Overcast',
         'VV': 'Vertical Visibility'
+    };
+
+    // Dictionary for weather codes used in Start/End events
+    const wxMap = {
+        'TS': 'Thunderstorm', 'SH': 'Showers', 'RA': 'Rain', 'SN': 'Snow',
+        'DZ': 'Drizzle', 'SG': 'Snow Grains', 'IC': 'Ice Crystals',
+        'PL': 'Ice Pellets', 'GR': 'Hail', 'GS': 'Small Hail', 'UP': 'Unknown Precip'
     };
 
     // Helper to get cardinal direction from degrees
@@ -90,7 +97,7 @@
             if (/^[A-Z0-9]{4}$/.test(token) && !decodedData['Station']) {
                 decodedData['Station'] = token;
             } 
-            // 2. Issuance Time (Converted to Local MM DD YY HH:MM)
+            // 2. Issuance Time
             else if (/^(\d{2})(\d{2})(\d{2})Z$/.test(token)) {
                 const match = token.match(/^(\d{2})(\d{2})(\d{2})Z$/);
                 const metarDay = parseInt(match[1], 10);
@@ -228,6 +235,39 @@
             if (rStr.includes('AO2')) { parsedRemarksData['Station Type'] = 'Automated (With Precip Discriminator)'; rStr = rStr.replace(/\bAO2\b/, ''); }
             if (rStr.includes('$')) { parsedRemarksData['Maintenance'] = 'System requires maintenance ($)'; rStr = rStr.replace(/\$/, ''); }
 
+            // PRECIPITATION BEGIN/END EVENTS (e.g. RAB35, SNE15, TSB15E30)
+            const precipEventRegex = /\b(TS|SH|RA|SN|DZ|SG|IC|PL|GR|GS|UP)(B\d{2,4}E\d{2,4}|B\d{2,4}|E\d{2,4})\b/g;
+            let eventMatches = [...rStr.matchAll(precipEventRegex)];
+            
+            eventMatches.forEach(match => {
+                const wxType = wxMap[match[1]] || match[1];
+                let desc = [];
+                
+                // Check for Begin time
+                let bMatch = match[2].match(/B(\d{2,4})/);
+                if (bMatch) {
+                    let tStr = bMatch[1];
+                    desc.push(`Began at ${tStr.length === 2 ? tStr + ' mins past the hour' : tStr.substring(0,2) + ':' + tStr.substring(2,4) + ' UTC'}`);
+                }
+                
+                // Check for End time
+                let eMatch = match[2].match(/E(\d{2,4})/);
+                if (eMatch) {
+                    let tStr = eMatch[1];
+                    desc.push(`Ended at ${tStr.length === 2 ? tStr + ' mins past the hour' : tStr.substring(0,2) + ':' + tStr.substring(2,4) + ' UTC'}`);
+                }
+                
+                let eventKey = `${wxType} Event`;
+                if (parsedRemarksData[eventKey]) {
+                    parsedRemarksData[eventKey] += `<br>${desc.join(', ')}`;
+                } else {
+                    parsedRemarksData[eventKey] = desc.join(', ');
+                }
+                
+                // Remove the matched string from the unparsed remarks pool
+                rStr = rStr.replace(match[0], '');
+            });
+
             const pkWndMatch = rStr.match(/\bPK WND (\d{3})(\d{2,3})\/(\d{2,4})\b/);
             if (pkWndMatch) {
                 const dirDeg = parseInt(pkWndMatch[1], 10);
@@ -242,7 +282,7 @@
                     spd = Math.round(spd * 1.15078); 
                     unitStr = "MPH";
                 }
-                let timeStr = pkWndMatch[3].length === 4 ? `at ${pkWndMatch[3].substring(0,2)}:${pkWndMatch[3].substring(2,4)}Z` : `at ${pkWndMatch[3]} minutes past the hour`;
+                let timeStr = pkWndMatch[3].length === 4 ? `at ${pkWndMatch[3].substring(0,2)}:${pkWndMatch[3].substring(2,4)}Z` : `at ${pkWndMatch[3]} mins past the hour`;
                 parsedRemarksData['Peak Wind'] = `${spd} ${unitStr} from ${dirStr} ${timeStr}`;
                 rStr = rStr.replace(pkWndMatch[0], '');
             }
