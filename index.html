@@ -26,7 +26,7 @@
 
 <div class="container">
     <h2>Paste METAR Here</h2>
-    <textarea id="metarInput" placeholder="e.g. KABC 121755Z AUTO 21016G24KT 180V240 1SM R11/P6000FT -RA BR BKN015 OVC025 06/04 A2990 RMK AO2 RAB35E50 SNE15 SLP125 P0003 T00640036" oninput="processMetar()"></textarea>
+    <textarea id="metarInput" placeholder="e.g. METAR KIZG 041754Z AUTO 28009G16KT 10SM BKN080 OVC090 16/03 A2971 RMK AO2 RAB1656E09 SLP062 P0000 60000 T01610033 10200 20094 53005" oninput="processMetar()"></textarea>
 
     <div class="controls">
         <h3 style="margin: 0;">Decoded Output</h3>
@@ -235,7 +235,7 @@
             if (rStr.includes('AO2')) { parsedRemarksData['Station Type'] = 'Automated (With Precip Discriminator)'; rStr = rStr.replace(/\bAO2\b/, ''); }
             if (rStr.includes('$')) { parsedRemarksData['Maintenance'] = 'System requires maintenance ($)'; rStr = rStr.replace(/\$/, ''); }
 
-            // PRECIPITATION BEGIN/END EVENTS (e.g. RAB35, SNE15, TSB15E30)
+            // PRECIPITATION BEGIN/END EVENTS
             const precipEventRegex = /\b(TS|SH|RA|SN|DZ|SG|IC|PL|GR|GS|UP)(B\d{2,4}E\d{2,4}|B\d{2,4}|E\d{2,4})\b/g;
             let eventMatches = [...rStr.matchAll(precipEventRegex)];
             
@@ -243,14 +243,12 @@
                 const wxType = wxMap[match[1]] || match[1];
                 let desc = [];
                 
-                // Check for Begin time
                 let bMatch = match[2].match(/B(\d{2,4})/);
                 if (bMatch) {
                     let tStr = bMatch[1];
                     desc.push(`Began at ${tStr.length === 2 ? tStr + ' mins past the hour' : tStr.substring(0,2) + ':' + tStr.substring(2,4) + ' UTC'}`);
                 }
                 
-                // Check for End time
                 let eMatch = match[2].match(/E(\d{2,4})/);
                 if (eMatch) {
                     let tStr = eMatch[1];
@@ -264,7 +262,6 @@
                     parsedRemarksData[eventKey] = desc.join(', ');
                 }
                 
-                // Remove the matched string from the unparsed remarks pool
                 rStr = rStr.replace(match[0], '');
             });
 
@@ -345,14 +342,26 @@
                 }
             });
 
+            // UPDATED PRESSURE TENDENCY (5appp)
             const pTendencyMatch = rStr.match(/\b5([0-8])(\d{3})\b/);
             if (pTendencyMatch) {
-                let changehPa = parseInt(pTendencyMatch[2], 10) / 10;
                 let a = parseInt(pTendencyMatch[1], 10);
-                let trend = "changed by";
-                if (a >= 0 && a <= 3) trend = "increased by";
-                if (a >= 5 && a <= 8) trend = "decreased by";
-                parsedRemarksData['Pressure Trend (3hr)'] = `${trend} ${changehPa.toFixed(1)} hPa`;
+                let changehPa = parseInt(pTendencyMatch[2], 10) / 10;
+                
+                const pTendencyMap = {
+                    0: 'Increasing, then decreasing',
+                    1: 'Increasing, then steady',
+                    2: 'Increasing steadily or unsteadily',
+                    3: 'Decreasing or steady, then increasing',
+                    4: 'Steady',
+                    5: 'Decreasing, then increasing',
+                    6: 'Decreasing, then steady',
+                    7: 'Decreasing steadily or unsteadily',
+                    8: 'Steady or increasing, then decreasing'
+                };
+                
+                let trendDesc = pTendencyMap[a] || 'Unknown trend';
+                parsedRemarksData['Pressure Tendency (3hr)'] = `${trendDesc} (change of ${changehPa.toFixed(1)} hPa)`;
                 rStr = rStr.replace(pTendencyMatch[0], '');
             }
 
