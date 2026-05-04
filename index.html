@@ -10,7 +10,7 @@
         textarea { width: 100%; height: 80px; padding: 10px; margin-bottom: 20px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-family: monospace; font-size: 16px; }
         .result-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
         .result-row strong { color: #333; }
-        .result-row span { color: #0056b3; }
+        .result-row span { color: #0056b3; text-align: right; max-width: 60%; }
         #output { margin-top: 10px; }
     </style>
 </head>
@@ -18,7 +18,7 @@
 
 <div class="container">
     <h2>Paste METAR Here</h2>
-    <textarea id="metarInput" placeholder="e.g. KJFK 121453Z 31015G25KT 10SM SCT040 15/08 A2992" oninput="decodeMetar()"></textarea>
+    <textarea id="metarInput" placeholder="e.g. KJFK 121453Z 31015G25KT 10SM SCT040 15/08 A2992" oninput="processMetar()"></textarea>
 
     <h3>Decoded Output</h3>
     <div id="output">
@@ -27,7 +27,132 @@
 </div>
 
 <script>
-    async function decodeMetar() {
+    // Dictionary for cloud cover codes
+    const cloudCoverMap = {
+        'SKC': 'Sky Clear',
+        'CLR': 'Clear below 12,000 feet',
+        'FEW': 'Few',
+        'SCT': 'Scattered',
+        'BKN': 'Broken',
+        'OVC': 'Overcast',
+        'VV': 'Vertical Visibility'
+    };
+
+    function decodeMetarLogic(metarRaw) {
+        metarRaw = metarRaw.toUpperCase().trim();
+        
+        // Remove the word "METAR" if the user pasted it at the start
+        if (metarRaw.startsWith("METAR ")) {
+            metarRaw = metarRaw.substring(6);
+        }
+
+        // Split at "RMK" first to handle remarks separately
+        const parts = metarRaw.split(' RMK ');
+        const mainBody = parts[0];
+        const remarks = parts.length > 1 ? parts[1] : null;
+
+        const tokens = mainBody.split(/\s+/);
+        const decodedData = {};
+
+        tokens.forEach(token => {
+            if (!token) return;
+
+            // 1. Station Identifier (ICAO)
+            if (/^[A-Z0-9]{4}$/.test(token) && !decodedData['Station']) {
+                decodedData['Station'] = token;
+            } 
+            // 2. Issuance Time
+            else if (/^(\d{2})(\d{2})(\d{2})Z$/.test(token)) {
+                const match = token.match(/^(\d{2})(\d{2})(\d{2})Z$/);
+                decodedData['Time'] = `Day ${match[1]} at ${match[2]}:${match[3]} UTC (Zulu)`;
+            } 
+            // 3. Modifiers
+            else if (token === 'COR') {
+                decodedData['Modifier'] = 'Corrected Observation';
+            }
+            else if (token === 'AUTO') {
+                decodedData['Modifier'] = 'Automated Observation';
+            }
+            // 4. Winds
+            else if (/^(\d{3}|VRB)(\d{2,3})(G\d{2,3})?(KT|MPS|KMH)$/.test(token)) {
+                const match = token.match(/^(\d{3}|VRB)(\d{2,3})(G\d{2,3})?(KT|MPS|KMH)$/);
+                const direction = match[1] === 'VRB' ? 'Variable' : `${match[1]}&deg; True`;
+                const speed = parseInt(match[2], 10);
+                const unit = match[4];
+                
+                let windString = `${speed} ${unit} from ${direction}`;
+                if (match[3]) {
+                    const gusts = parseInt(match[3].substring(1), 10);
+                    windString += `, Gusting to ${gusts} ${unit}`;
+                }
+                decodedData['Winds'] = windString;
+            } 
+            // 5. Visibility
+            else if (/^(P?)([\d\/]+)SM$/.test(token)) {
+                const match = token.match(/^(P?)([\d\/]+)SM$/);
+                const prefix = match[1] === 'P' ? 'Greater than ' : '';
+                decodedData['Visibility'] = `${prefix}${match[2]} Statute Miles`;
+            }
+            // 6. Sky Condition / Clouds
+            else if (/^(SKC|CLR|FEW|SCT|BKN|OVC|VV)(\d{3})?(CB|TCU)?$/.test(token)) {
+                const match = token.match(/^(SKC|CLR|FEW|SCT|BKN|OVC|VV)(\d{3})?(CB|TCU)?$/);
+                const cover = cloudCoverMap[match[1]];
+                let layer = cover;
+                
+                if (match[2]) {
+                    const height = parseInt(match[2], 10) * 100;
+                    layer += ` at ${height.toLocaleString()} feet`;
+                }
+                if (match[3]) {
+                    const type = match[3] === 'CB' ? ' (Cumulonimbus)' : ' (Towering Cumulus)';
+                    layer += type;
+                }
+                
+                if (decodedData['Sky Condition']) {
+                    decodedData['Sky Condition'] += "<br>" + layer;
+                } else {
+                    decodedData['Sky Condition'] = layer;
+                }
+            }
+            // 7. Temperature & Dewpoint
+            else if (/^(M?\d{2})\/(M?\d{2})?$/.test(token)) {
+                const match = token.match(/^(M?\d{2})\/(M?\d{2})?$/);
+                const temp = match[1].replace('M', '-');
+                const dewpoint = match[2] ? match[2].replace('M', '-') : 'Unknown';
+                decodedData['Temperature / Dewpoint'] = `${temp} &deg;C / ${dewpoint} &deg;C`;
+            } 
+            // 8. Altimeter / Pressure
+            else if (/^A(\d{4})$/.test(token)) {
+                const match = token.match(/^A(\d{4})$/);
+                const inches = match[1].substring(0, 2) + "." + match[1].substring(2, 4);
+                decodedData['Altimeter'] = `${inches} inHg`;
+            }
+            // 9. Basic Weather Phenomena
+            else if (/^(-|\+|VC)?(TS|SH|FZ|PR|MI|BC|DR|BL)?(RA|SN|DZ|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)+$/.test(token)) {
+                const match = token.match(/^(-|\+|VC)?(TS|SH|FZ|PR|MI|BC|DR|BL)?(RA|SN|DZ|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)+$/);
+                let intensity = "";
+                if (match && match[1] === '-') intensity = "Light ";
+                if (match && match[1] === '+') intensity = "Heavy ";
+                if (match && match[1] === 'VC') intensity = "In Vicinity: ";
+                
+                let wxString = intensity + token + " (Raw Code)";
+                if (decodedData['Weather']) {
+                    decodedData['Weather'] += ", " + wxString;
+                } else {
+                    decodedData['Weather'] = wxString;
+                }
+            }
+        });
+
+        // Attach Remarks
+        if (remarks) {
+            decodedData['Remarks'] = remarks;
+        }
+
+        return decodedData;
+    }
+
+    function processMetar() {
         const input = document.getElementById('metarInput').value.trim();
         const outputDiv = document.getElementById('output');
 
@@ -37,25 +162,11 @@
         }
 
         try {
-            // Send the raw string to our PHP script using the Fetch API
-            const response = await fetch('MetarDecoder.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'metar=' + encodeURIComponent(input)
-            });
-
-            const data = await response.json();
+            // Decode directly in JS instead of calling a backend
+            const decodedResult = decodeMetarLogic(input);
             
-            if (data.error) {
-                outputDiv.innerHTML = `<p style="color: red;">${data.error}</p>`;
-                return;
-            }
-
-            // Build the HTML to display the decoded parameters
             let htmlContent = '';
-            for (const [key, value] of Object.entries(data.decoded)) {
+            for (const [key, value] of Object.entries(decodedResult)) {
                 htmlContent += `
                     <div class="result-row">
                         <strong>${key}</strong>
