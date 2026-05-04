@@ -38,7 +38,7 @@
 
         try {
             // Send the raw string to our PHP script using the Fetch API
-            const response = await fetch('decode.php', {
+            const response = await fetch('MetarDecoder.php', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
